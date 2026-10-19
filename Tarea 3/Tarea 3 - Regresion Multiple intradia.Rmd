@@ -1,0 +1,261 @@
+---
+title: "Tarea 3 - Regresion Multiple con datos intradia y Supuestos del Modelo"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Librerias
+
+```{r}
+library(readxl)
+library(car)
+library(lmtest)
+```
+
+## Datos
+
+Se usan los precios de 5 minutos del 8 y 9 de octubre de 2026 bajados de LSEG Workspace (hoja "5min" del archivo "Datos intradia LSEG.xlsx"), en hora de Nueva York y solo en horario normal (9:30 a 16:00). Se eligio el intervalo de 5 minutos para los tres modelos porque da suficientes observaciones (153 rendimientos) para estimar 5 variables, y en la Actividad 3 fue el intervalo con menos problemas de supuestos. Los tres modelos usan los mismos tiempos.
+
+```{r}
+leer_rend <- function(hoja, cols) {
+  datos <- as.data.frame(read_excel("Datos intradia LSEG.xlsx", sheet = hoja))
+  datos <- na.omit(datos[, c("fecha_hora_NY", cols)])
+  n <- nrow(datos)
+  rend <- datos[-1, cols] / datos[-n, cols] - 1
+  mismo_dia <- as.Date(datos$fecha_hora_NY[-1]) == as.Date(datos$fecha_hora_NY[-n])
+  rend <- as.data.frame(rend)[mismo_dia, , drop = FALSE]
+  colnames(rend) <- cols
+  rend
+}
+```
+
+```{r}
+acciones <- c("jpm", "bac", "c", "gs", "xom", "cvx", "cop", "uso",
+              "nvda", "amd", "avgo", "msft", "smh", "spy", "tlt")
+r5 <- leer_rend("5min", acciones)
+nrow(r5)
+round(cor(r5), 2)
+```
+
+Las acciones del mismo sector se mueven juntas (JPM con BAC 0.72 y con C 0.70; XOM con CVX 0.82 y con COP 0.74; NVDA con SMH 0.75 y con AMD 0.65), mientras que entre sectores la correlacion es baja o negativa (JPM con NVDA -0.18, XOM con NVDA -0.19). Esto es la base de la estrategia del portafolio.
+
+## Modelo 1 - Bancos: JPM vs BAC + C + GS + SPY + TLT
+
+Teoria: JPM deberia moverse con otros bancos grandes (BAC, C y GS), con el mercado (SPY) y con las tasas de interes (TLT).
+
+```{r}
+modelo1 <- lm(jpm ~ bac + c + gs + spy + tlt, data = r5)
+summary(modelo1)
+confint(modelo1)
+```
+
+```{r}
+vif(modelo1)
+bptest(modelo1)
+gqtest(modelo1)
+dwtest(modelo1)
+```
+
+## Comentarios - Modelo 1
+
+Los residuales tienen una mediana casi de cero (0.00005) y cuartiles parecidos (-0.00039 y 0.00036), entonces no hay sesgo hacia un lado.
+
+En promedio, manteniendo constantes las demas variables, si BAC sube 1% en 5 minutos se asocia a un aumento de 0.35% en JPM; si C sube 1%, JPM sube 0.24%; y si GS sube 1%, JPM sube 0.16%. Las tres son significativas al 5% (BAC con p < 0.001, C con p = 0.0015 y GS con p = 0.003), y sus intervalos de confianza no incluyen el cero.
+
+Para SPY (p = 0.33) y TLT (p = 1.00) no podemos descartar que beta es cero. A 5 minutos JPM se mueve con los otros bancos, no con el mercado ni con las tasas.
+
+El modelo explica el 58% de la variacion de JPM (R2 ajustada = 0.585) y la F es significativa (F = 43.8, p < 0.001).
+
+Supuestos:
+
+- Multicolinealidad: todos los VIF son menores a 5 (el mas alto es C con 2.60). Aunque los bancos estan correlacionados entre si, no lo suficiente para causar problema.
+- Heteroscedasticidad: Breusch-Pagan (p = 0.62) y Goldfeld-Quandt (p = 0.99) no rechazan la varianza constante.
+- Autocorrelacion: el Durbin-Watson es 2.11, muy cerca de 2, y la prueba no rechaza la hipotesis de no autocorrelacion (p = 0.75).
+
+El modelo 1 no viola ninguno de los supuestos revisados, asi que no requiere correccion.
+
+## Modelo 2 - Energia: XOM vs CVX + COP + USO + SPY + TLT
+
+Teoria: XOM deberia moverse con otras petroleras (CVX y COP), con el precio del petroleo (USO), con el mercado (SPY) y con las tasas (TLT).
+
+```{r}
+modelo2 <- lm(xom ~ cvx + cop + uso + spy + tlt, data = r5)
+summary(modelo2)
+confint(modelo2)
+```
+
+```{r}
+vif(modelo2)
+bptest(modelo2)
+gqtest(modelo2)
+dwtest(modelo2)
+```
+
+## Comentarios - Modelo 2
+
+Los residuales tienen una mediana casi de cero (0.00007) y cuartiles parecidos (-0.00029 y 0.00027).
+
+En promedio, manteniendo constantes las demas variables, si CVX sube 1% en 5 minutos se asocia a un aumento de 0.58% en XOM, y si COP sube 1%, XOM sube 0.26% (las dos con p < 0.001). Si SPY sube 1%, XOM baja 0.28% (p = 0.006): comparando momentos con el mismo movimiento de las petroleras, XOM se comporta defensiva frente al mercado. Esto es el mismo resultado que en la Tarea 2 con datos semanales (beta de SPY de -0.25).
+
+Para USO (p = 0.28) y TLT (p = 0.14) no podemos descartar que beta es cero. Una vez que se incluyen CVX y COP, el precio del petroleo ya no agrega informacion, porque las otras petroleras ya la reflejan.
+
+Es el modelo con mejor ajuste: explica el 73% de la variacion de XOM (R2 ajustada = 0.726), con F = 81.7 (p < 0.001).
+
+Supuestos:
+
+- Multicolinealidad: todos los VIF son menores a 5 (el mas alto es COP con 2.39).
+- Heteroscedasticidad: Breusch-Pagan da p = 0.053, apenas arriba de 0.05; al 5% no se rechaza la varianza constante, pero al 10% si. Goldfeld-Quandt no la detecta (p = 0.97). Es una senal debil que hay que vigilar.
+- Autocorrelacion: el Durbin-Watson es 2.26 y la prueba no rechaza la hipotesis de no autocorrelacion (p = 0.95).
+
+Recomendacion: como la heteroscedasticidad esta en el limite, si se usara este modelo para tomar decisiones convendria confirmar la significancia de las betas con errores estandar robustos a heteroscedasticidad.
+
+## Modelo 3 - Tecnologia: NVDA vs AMD + AVGO + MSFT + SPY + SMH
+
+Teoria: NVDA deberia moverse con otras empresas de semiconductores (AMD y AVGO), con otra tecnologica grande (MSFT), con el mercado (SPY) y con el ETF de semiconductores (SMH).
+
+```{r}
+modelo3 <- lm(nvda ~ amd + avgo + msft + spy + smh, data = r5)
+summary(modelo3)
+confint(modelo3)
+```
+
+```{r}
+vif(modelo3)
+bptest(modelo3)
+gqtest(modelo3)
+dwtest(modelo3)
+```
+
+## Comentarios - Modelo 3
+
+Los residuales tienen una mediana casi de cero (0.00004) y cuartiles parecidos (-0.00051 y 0.00047).
+
+En promedio, manteniendo constantes las demas variables, si SMH sube 1% en 5 minutos se asocia a un aumento de 0.49% en NVDA (p < 0.001). Es la unica variable significativa al 5%. Para AMD (p = 0.73), AVGO (p = 0.57), MSFT (p = 0.13) y SPY (p = 0.82) no podemos descartar que beta es cero.
+
+El modelo explica el 55% de la variacion de NVDA (R2 ajustada = 0.554) y la F es significativa (F = 38.8, p < 0.001). El modelo completo funciona pero casi ninguna variable sale significativa por separado: es la senal de multicolinealidad.
+
+Supuestos:
+
+- Multicolinealidad: SMH tiene VIF de 7.18 (mayor a 5): el resto de las variables explica el 86% de sus movimientos (1 - 1/7.18). Tiene sentido porque SMH es un ETF que tiene dentro a NVDA, AMD y AVGO, y se mueve casi igual que AMD (correlacion 0.85) y AVGO (0.81). El modelo no sabe como repartir el efecto entre SMH y las empresas que contiene.
+- Heteroscedasticidad: Breusch-Pagan rechaza la varianza constante (p = 0.005): hay heteroscedasticidad. Goldfeld-Quandt no la detecta (p = 0.84).
+- Autocorrelacion: el Durbin-Watson es 2.10 y la prueba no rechaza la hipotesis de no autocorrelacion (p = 0.72).
+
+## Correccion de multicolinealidad - Modelo 3
+
+Quitamos SMH porque tiene el VIF mas alto y, por teoria, repite informacion: el ETF ya incluye a AMD, AVGO y a la propia NVDA.
+
+```{r}
+modelo3b <- lm(nvda ~ amd + avgo + msft + spy, data = r5)
+summary(modelo3b)
+confint(modelo3b)
+```
+
+```{r}
+vif(modelo3b)
+bptest(modelo3b)
+gqtest(modelo3b)
+dwtest(modelo3b)
+```
+
+## Comentarios - Modelo 3 corregido
+
+Sin SMH todos los VIF quedan abajo de 5 (el mas alto es SPY con 2.42), entonces se corrigio la multicolinealidad.
+
+En promedio, manteniendo constantes las demas variables, si AMD sube 1% en 5 minutos se asocia a un aumento de 0.20% en NVDA (p < 0.001), y si AVGO sube 1%, NVDA sube 0.22% (p < 0.001). Con SMH en el modelo ninguna de las dos era significativa; al quitarlo, AMD y AVGO recuperan la parte del efecto que absorbia SMH. MSFT (p = 0.73) y SPY (p = 0.13) siguen sin ser significativas al 5%.
+
+El modelo explica el 49% de la variacion de NVDA (R2 ajustada = 0.492, F = 37.8, p < 0.001). Perdimos algo de ajuste contra el modelo con SMH (0.554), pero las betas ahora son confiables y se pueden interpretar.
+
+Ademas, sin SMH la heteroscedasticidad deja de ser significativa (Breusch-Pagan p = 0.12), y el Durbin-Watson sigue cerca de 2 (2.13, p = 0.79).
+
+## Resumen de la deteccion de supuestos
+
+| Modelo | Multicolinealidad (VIF > 5) | Heteroscedasticidad (Breusch-Pagan) | Autocorrelacion (Durbin-Watson) |
+|---|---|---|---|
+| 1 Bancos (JPM) | No (max 2.60) | No (p = 0.62) | No (DW = 2.11) |
+| 2 Energia (XOM) | No (max 2.39) | Limite (p = 0.053) | No (DW = 2.26) |
+| 3 Tecnologia (NVDA) | Si: SMH = 7.18 | Si (p = 0.005) | No (DW = 2.10) |
+| 3 corregido (sin SMH) | No (max 2.42) | No (p = 0.12) | No (DW = 2.13) |
+
+Recomendaciones de correccion:
+
+- Multicolinealidad: quitar la variable con el VIF mas alto que repita informacion por teoria (como se hizo con SMH) y volver a correr el VIF.
+- Heteroscedasticidad: usar errores estandar robustos para confirmar la significancia de las betas, o modelar la volatilidad que cambia durante el dia.
+- Autocorrelacion: no se detecto a 5 minutos en ningun modelo, lo que es consistente con un mercado eficiente: lo que paso en los 5 minutos anteriores no ayuda a predecir el error de los siguientes. Si apareciera (como pasa a 1 minuto en la Actividad 3), se puede agregar el rezago de la variable dependiente o usar errores estandar robustos a autocorrelacion.
+
+## Estrategia del portafolio (HowTheMarketWorks)
+
+El portafolio tiene JPM, XOM y NVDA con pesos de 40%, 38% y 22%, comprado el 6 de octubre con el 60% del efectivo. La estrategia inicial decia que en la segunda semana se invierte otro 30%.
+
+Lo que dicen los modelos intradia para la estrategia:
+
+- JPM se mueve con los otros bancos (BAC, C y GS), no con el mercado. Su riesgo es sobre todo del sector bancario, asi que no conviene agregar mas bancos al portafolio: no diversificaria.
+- XOM se mueve con las otras petroleras y tiene beta negativa con el mercado (-0.28), igual que en el modelo semanal. Confirma su papel de diversificador del portafolio.
+- NVDA depende de los semiconductores (AMD y AVGO). Es la mas volatil, por eso mantiene el menor peso.
+- Entre sectores las correlaciones a 5 minutos son bajas o negativas (JPM con NVDA -0.18, XOM con NVDA -0.19, JPM con XOM 0.15), asi que la diversificacion entre los tres sectores tambien se cumple dentro del dia, no solo con datos semanales.
+
+Decision: se mantienen los pesos 40/38/22 y se invierte el segundo 30% del efectivo (alrededor de $300,000): unos $120,000 en JPM, $114,000 en XOM y $66,000 en NVDA. Se queda 10% en efectivo como colchon y no se usa margen.
+
+Los screenshots de las operaciones en HowTheMarketWorks se entregan en archivo aparte.
+
+## Revision con TecGPT
+
+Se uso TecGPT para revisar los modelos, proponer combinaciones de variables, definir el perfil de inversion y recomendar correcciones de supuestos (el prompt y la respuesta completa se anexan en PDF). Lo que se toma de su respuesta:
+
+- Combinaciones de variables: propone agregar factores macro que no estan en los modelos, como la pendiente de la curva de tasas (10 anos menos 2 anos) y el VIX para JPM, el dolar (DXY) para XOM, y tasas reales para NVDA. Quedan como siguiente paso para mejorar la especificacion.
+- Supuestos: recomienda pruebas adicionales a las vistas en clase, como Breusch-Godfrey (autocorrelacion de orden mayor), RESET de Ramsey (forma funcional) y ARCH (volatilidad que cambia en el tiempo), y errores estandar robustos (White o Newey-West) cuando hay heteroscedasticidad, que coincide con la recomendacion para el modelo 3.
+- Perfil de inversion: clasifica el portafolio como de riesgo moderado a agresivo, porque son solo 3 acciones, 78% esta en energia y bancos, y NVDA es muy volatil.
+
+En un punto no coincidimos: TecGPT atribuye el signo negativo de SPY en XOM a multicolinealidad, pero en nuestros modelos el VIF de SPY es de 1.1 tanto en el semanal como en el de 5 minutos, asi que no hay multicolinealidad; el resultado es consistente en los dos horizontes y lo interpretamos como un comportamiento defensivo de XOM frente al mercado.
+
+TecGPT tambien sugiere usar el segundo 30% en un activo defensivo (bonos, salud o consumo basico) para diversificar mas. Por ahora se mantiene la estrategia original con las acciones de los modelos, porque las correlaciones entre los tres sectores son bajas en semanas y en minutos; agregar un activo defensivo queda como siguiente paso, despues de modelarlo igual que las otras acciones.
+
+## Gujarati Capitulo 12 - Autocorrelacion: preguntas 12.1 a 12.3
+
+### 12.1 Verdadero o falso
+
+a) Falso. Con autocorrelacion los estimadores de MCO siguen siendo insesgados (y consistentes); lo que pierden es la eficiencia: ya no son de varianza minima (dejan de ser MELI/BLUE).
+
+b) Verdadero. La prueba d de Durbin-Watson supone que el error es homoscedastico (ademas de que el modelo tiene intercepto, las X son no estocasticas, el esquema es AR(1), los errores son normales y no hay rezagos de Y como regresoras).
+
+c) Falso. La transformacion de primeras diferencias supone que rho = +1 (autocorrelacion positiva perfecta), no -1.
+
+d) Verdadero. En un modelo la variable dependiente es Y y en el otro es la diferencia de Y; como explican variables distintas, sus R2 no se pueden comparar directamente.
+
+e) Verdadero. Un d significativo puede venir de un error de especificacion (una variable omitida o una forma funcional incorrecta) o de autocorrelacion de orden mayor, no necesariamente de autocorrelacion pura de primer orden.
+
+f) Verdadero. Con autocorrelacion, los pronosticos de MCO no son eficientes y las varianzas y errores estandar calculados con las formulas usuales no son correctos (normalmente subestiman la varianza verdadera).
+
+g) Verdadero. Si se omite una variable importante que tiene tendencia o esta correlacionada en el tiempo, su efecto se queda en los residuales y estos se ven autocorrelacionados, dando un d significativo (sesgo de especificacion).
+
+h) Verdadero. La prueba de rho = 1 se hace con el estadistico g de Berenblutt-Webb, que se evalua con las mismas tablas de Durbin-Watson. Tambien se puede usar la d: como d es aproximadamente 2(1 - rho), una d cercana a cero indica rho cercano a 1.
+
+i) Verdadero. Si el modelo original es Yt = b1 + b2 t + b3 t^2 + ut, al sacar primeras diferencias queda un termino constante mas un termino de tendencia lineal (por la diferencia de t^2). Entonces una constante y una tendencia lineal en el modelo en diferencias implican una tendencia lineal y una cuadratica en el modelo original.
+
+### 12.2 Durbin-Watson con n = 50 y k' = 4
+
+Valores criticos al 5% (n = 50, 4 variables explicativas): dL = 1.378 y dU = 1.721; por lo tanto 4 - dU = 2.279 y 4 - dL = 2.622.
+
+a) d = 1.05 < dL = 1.378: hay evidencia de autocorrelacion positiva.
+
+b) d = 1.40 esta entre dL = 1.378 y dU = 1.721: zona de indecision, la prueba no es concluyente.
+
+c) d = 2.50 esta entre 4 - dU = 2.279 y 4 - dL = 2.622: zona de indecision, no es concluyente.
+
+d) d = 3.97 > 4 - dL = 2.622: hay evidencia de autocorrelacion negativa.
+
+### 12.3 Participacion del trabajo (1949-1964, n = 16)
+
+a) Modelo A (una variable, t): con n = 16 y k' = 1, dL = 1.106 y dU = 1.371. Como d = 0.8252 < 1.106, hay autocorrelacion positiva.
+Modelo B (dos variables, t y t^2): con k' = 2, dL = 0.982 y dU = 1.539. Como d = 1.82 esta entre dU = 1.539 y 4 - dU = 2.461, no hay autocorrelacion.
+
+b) La autocorrelacion del modelo A viene de un error de especificacion: le falta el termino cuadratico t^2, que en el modelo B sale significativo (t = 2.78). Al omitirlo, su efecto se queda en los residuales y aparenta autocorrelacion. Al incluirlo, la d sube de 0.83 a 1.82 y la autocorrelacion desaparece.
+
+c) Para distinguirlas se corrige la especificacion (se agregan las variables omitidas o se cambia la forma funcional) y se vuelve a hacer la prueba. Si la autocorrelacion desaparece, era sesgo de especificacion; si se mantiene con el modelo bien especificado, es autocorrelacion pura y hay que corregirla con metodos como diferencias generalizadas o errores estandar robustos (Newey-West).
+
+## Declaracion de uso de inteligencia artificial
+
+Se utilizó Claude (Anthropic) como apoyo para descargar los datos de LSEG, escribir y revisar el código en R y redactar un primer borrador de las interpretaciones, que el autor revisó, verificó contra los resultados y ajustó.
