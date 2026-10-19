@@ -1,0 +1,209 @@
+---
+title: "Actividad 3 - Regresion Simple y Multiple con datos intradia (LSEG)"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Librerias
+
+```{r}
+library(readxl)
+library(quantmod)
+library(car)
+library(lmtest)
+```
+
+## Datos
+
+Los precios intradia se bajaron de LSEG Workspace (Price History) y se juntaron en el archivo "Datos intradia LSEG.xlsx", con una hoja por intervalo. La hora esta en hora de Nueva York y solo se dejo el horario normal de mercado (9:30 a 16:00).
+
+- 1 minuto: 9 de octubre de 2026.
+- 5 minutos: 8 y 9 de octubre de 2026.
+- 30 minutos: 5 al 9 de octubre de 2026.
+
+Para 1 y 5 minutos se usaron 1 y 2 dias, como piden las instrucciones. Para 30 minutos se uso la semana completa porque con 1 o 2 dias solo habria 13 a 26 rendimientos, muy pocos para estimar un modelo con 3 variables independientes.
+
+Esta funcion lee una hoja, se queda con los minutos donde todas las acciones del modelo tienen precio y calcula el rendimiento de cada intervalo. No se usa el rendimiento de la noche (del cierre de un dia a la apertura del siguiente), solo rendimientos dentro del mismo dia.
+
+```{r}
+leer_rend <- function(hoja, cols) {
+  datos <- as.data.frame(read_excel("Datos intradia LSEG.xlsx", sheet = hoja))
+  datos <- na.omit(datos[, c("fecha_hora_NY", cols)])
+  n <- nrow(datos)
+  rend <- datos[-1, cols] / datos[-n, cols] - 1
+  mismo_dia <- as.Date(datos$fecha_hora_NY[-1]) == as.Date(datos$fecha_hora_NY[-n])
+  rend <- as.data.frame(rend)[mismo_dia, , drop = FALSE]
+  colnames(rend) <- cols
+  rend
+}
+```
+
+```{r}
+r1 <- leer_rend("1min", c("nvda", "msft", "jpm", "spy", "bac", "tlt"))
+r5 <- leer_rend("5min", c("nvda", "msft", "jpm", "spy", "bac", "tlt"))
+r30 <- leer_rend("30min", c("nvda", "msft", "jpm", "spy", "bac", "tlt"))
+```
+
+## Modelos originales (semanales, Tareas 1 y 2)
+
+Para comparar, se vuelven a calcular los modelos originales con rendimientos semanales de enero de 2023 al 2 de octubre de 2026.
+
+```{r}
+getSymbols(c("NVDA", "MSFT", "JPM", "SPY", "BAC", "TLT"), from = "2023-01-01", to = "2026-10-03")
+
+semanal <- na.omit(merge(weeklyReturn(NVDA$NVDA.Close), weeklyReturn(MSFT$MSFT.Close),
+                         weeklyReturn(JPM$JPM.Close), weeklyReturn(SPY$SPY.Close),
+                         weeklyReturn(BAC$BAC.Close), weeklyReturn(TLT$TLT.Close)))
+colnames(semanal) <- c("nvda", "msft", "jpm", "spy", "bac", "tlt")
+semanal <- as.data.frame(semanal)
+```
+
+```{r}
+modeloA_sem <- lm(nvda ~ msft, data = semanal)
+summary(modeloA_sem)
+```
+
+```{r}
+modeloB_sem <- lm(jpm ~ spy + bac + tlt, data = semanal)
+summary(modeloB_sem)
+```
+
+## Modelo A - Regresion simple: NVDA vs MSFT (Tarea 1)
+
+### 1 minuto
+
+```{r}
+modeloA_1 <- lm(nvda ~ msft, data = r1)
+summary(modeloA_1)
+confint(modeloA_1)
+bptest(modeloA_1)
+dwtest(modeloA_1)
+```
+
+### 5 minutos
+
+```{r}
+modeloA_5 <- lm(nvda ~ msft, data = r5)
+summary(modeloA_5)
+confint(modeloA_5)
+bptest(modeloA_5)
+dwtest(modeloA_5)
+```
+
+### 30 minutos
+
+```{r}
+modeloA_30 <- lm(nvda ~ msft, data = r30)
+summary(modeloA_30)
+confint(modeloA_30)
+bptest(modeloA_30)
+dwtest(modeloA_30)
+```
+
+```{r}
+plot(r30$msft, r30$nvda, pch = 20, main = "NVDA vs MSFT - rendimientos de 30 minutos")
+abline(modeloA_30, col = "blue")
+```
+
+## Comentarios - Modelo A
+
+A 1 minuto (384 rendimientos), si MSFT sube 1%, NVDA sube en promedio 0.14% (p < 0.001), pero el modelo solo explica el 3% de la variacion de NVDA (R2 = 0.028).
+
+A 5 minutos (154 rendimientos) la beta es de 0.18 (p = 0.018) y el modelo explica el 4% (R2 = 0.036).
+
+A 30 minutos (60 rendimientos) la beta sube a 0.41 (p = 0.011) y el modelo explica el 11% (R2 = 0.106).
+
+En el modelo original semanal la beta es de 0.79 (p < 0.001) y explica el 23% (R2 = 0.227).
+
+La relacion existe en todos los intervalos, pero entre mas largo el intervalo, mas grande la beta y el R2. Esto se conoce como efecto Epps: en intervalos muy cortos cada accion reacciona a la informacion con segundos o minutos de diferencia, asi que todavia no se mueven juntas; con intervalos mas largos la relacion aparece completa.
+
+Supuestos:
+
+- Heteroscedasticidad: Breusch-Pagan no la rechaza a 1 minuto (p = 0.10) ni a 5 minutos (p = 0.42), pero si a 30 minutos (p = 0.006): a 30 minutos la variacion de los errores cambia entre momentos del dia (mas al abrir y al cerrar).
+- Autocorrelacion: el Durbin-Watson queda cerca de 2 en los tres intervalos (1.97, 1.84 y 1.93) y la prueba no rechaza la hipotesis de no autocorrelacion (p = 0.39, 0.16 y 0.38).
+
+## Modelo B - Regresion multiple: JPM vs SPY + BAC + TLT (Tarea 2)
+
+### 1 minuto
+
+```{r}
+modeloB_1 <- lm(jpm ~ spy + bac + tlt, data = r1)
+summary(modeloB_1)
+confint(modeloB_1)
+vif(modeloB_1)
+bptest(modeloB_1)
+dwtest(modeloB_1)
+```
+
+### 5 minutos
+
+```{r}
+modeloB_5 <- lm(jpm ~ spy + bac + tlt, data = r5)
+summary(modeloB_5)
+confint(modeloB_5)
+vif(modeloB_5)
+bptest(modeloB_5)
+dwtest(modeloB_5)
+```
+
+### 30 minutos
+
+```{r}
+modeloB_30 <- lm(jpm ~ spy + bac + tlt, data = r30)
+summary(modeloB_30)
+confint(modeloB_30)
+vif(modeloB_30)
+bptest(modeloB_30)
+dwtest(modeloB_30)
+```
+
+## Comentarios - Modelo B
+
+En los tres intervalos solo BAC es significativa. Manteniendo constantes SPY y TLT, si BAC sube 1% JPM sube en promedio 0.62% a 1 minuto, 0.60% a 5 minutos y 0.54% a 30 minutos, todas con p < 0.001.
+
+SPY y TLT no son significativas en ningun intervalo intradia (p > 0.13) y sus intervalos de confianza incluyen el cero.
+
+Los modelos explican alrededor de la mitad de la variacion de JPM (R2 ajustada de 0.555 a 1 minuto, 0.508 a 5 minutos y 0.534 a 30 minutos) y la F es significativa en los tres (p < 0.001).
+
+No hay multicolinealidad: todos los VIF son menores a 1.2.
+
+Heteroscedasticidad: Breusch-Pagan no la rechaza al 5% en ningun intervalo (p = 0.067 a 1 minuto, 0.75 a 5 minutos y 0.93 a 30 minutos).
+
+Autocorrelacion: a 5 minutos (DW = 1.88) y a 30 minutos (DW = 2.02) el DW esta cerca de 2. A 1 minuto el DW es 2.36, arriba de 2, lo que apunta a autocorrelacion negativa: un minuto sube y el siguiente baja. Esto es tipico de datos de muy alta frecuencia, porque el precio rebota entre el precio de compra y el de venta (bid-ask bounce). La prueba de R (que busca autocorrelacion positiva) no la rechaza (p cercano a 1).
+
+## Comparacion con los modelos originales
+
+| | Semanal 2023-2026 | 30 minutos | 5 minutos | 1 minuto |
+|---|---|---|---|---|
+| Modelo A: beta de MSFT | 0.79 (sig.) | 0.41 (sig.) | 0.18 (sig.) | 0.14 (sig.) |
+| Modelo A: R2 | 0.227 | 0.106 | 0.036 | 0.028 |
+| Modelo B: beta de BAC | 0.59 (sig.) | 0.54 (sig.) | 0.60 (sig.) | 0.62 (sig.) |
+| Modelo B: beta de SPY | 0.36 (sig.) | -0.12 (no sig.) | 0.13 (no sig.) | 0.14 (no sig.) |
+| Modelo B: beta de TLT | -0.24 (sig.) | 0.08 (no sig.) | -0.02 (no sig.) | -0.03 (no sig.) |
+| Modelo B: R2 ajustada | 0.730 | 0.534 | 0.508 | 0.555 |
+
+Similitudes:
+
+- La relacion entre JPM y su competidor BAC es muy estable: la beta queda entre 0.54 y 0.62 en todos los intervalos, igual que en el modelo semanal (0.59). Es la relacion mas fuerte y no depende del intervalo.
+- En los modelos intradia tampoco hay multicolinealidad, igual que en el modelo semanal corregido.
+
+Diferencias:
+
+- El mercado (SPY) y las tasas (TLT) son significativos en el modelo semanal, pero no en ningun intervalo intradia. El efecto de las tasas y del mercado sobre un banco se va acumulando con el tiempo y no se alcanza a ver en minutos.
+- La relacion entre NVDA y MSFT existe en todos los intervalos, pero en minutos es muy debil (beta de 0.14 y R2 de 3% a 1 minuto) y se va fortaleciendo conforme el intervalo es mas largo (0.41 a 30 minutos y 0.79 semanal): efecto Epps.
+- Los R2 intradia son menores que los semanales: en minutos hay mucho mas ruido (ordenes grandes, rebotes de precio) que no tiene que ver con las otras acciones.
+- En datos intradia aparecen problemas de supuestos: heteroscedasticidad en NVDA a 30 minutos y autocorrelacion negativa en JPM a 1 minuto (DW = 2.36).
+
+Conclusion: para una estrategia de portafolio de mediano plazo conviene usar los modelos semanales; los intradia sirven para ver como se mueven las acciones dentro del dia, pero las relaciones con el mercado y las tasas no se alcanzan a ver en intervalos tan cortos.
+
+## Declaracion de uso de inteligencia artificial
+
+Se utilizo Claude (Anthropic) como apoyo para descargar los datos de LSEG, escribir y revisar el codigo en R y redactar un primer borrador de las interpretaciones, que el autor reviso, verifico contra los resultados y ajusto.
+
+
+
+
