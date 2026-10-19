@@ -1,0 +1,270 @@
+---
+title: "Tarea 4 - Clase Bloomberg: cotejo de regresiones y correlaciones"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Librerias
+
+```{r}
+library(quantmod)
+library(readxl)
+```
+
+## Objetivo
+
+Cotejar que los resultados de Bloomberg sean los mismos que los de R:
+
+1. Las regresiones lineales simples de Bloomberg (funcion HRA) contra el mismo modelo en R.
+2. Las matrices de correlacion de Bloomberg (funcion CORR) contra las mismas matrices en R.
+3. Los datos intradia de 5 minutos de Bloomberg contra los de LSEG, con el mismo modelo de regresion y la misma matriz de correlacion.
+
+Los screenshots de Bloomberg se entregan en archivo aparte, junto con los resultados de R de este documento.
+
+## Parte 1 - Datos diarios
+
+Se bajan los precios de cierre diarios de las acciones usadas en Bloomberg, del 1 de enero de 2023 al 12 de octubre de 2026 (las mismas fechas de las pantallas HRA).
+
+```{r}
+acciones <- c("JPM", "GS", "NVDA", "AMD", "XOM", "USO", "SPY", "AVGO", "MSFT",
+              "SMH", "BAC", "C", "TLT", "CVX", "COP")
+getSymbols(acciones, from = "2023-01-01", to = "2026-10-13")
+```
+
+```{r}
+# Junta los precios de cierre de varias acciones en una sola tabla
+precios <- function(tickers) {
+  x <- do.call(merge, lapply(tickers, function(t) Cl(get(t))))
+  colnames(x) <- tolower(tickers)
+  x
+}
+```
+
+## Parte 2 - Regresion lineal simple: Bloomberg (HRA) vs R
+
+En Bloomberg (HRA) las tres regresiones se hicieron con el precio de cierre diario (Last Price), en niveles ("Reg On: Value"), del 01/01/2023 al 10/12/2026. Se replica igual en R.
+
+```{r}
+diario <- as.data.frame(na.omit(precios(c("JPM", "GS", "NVDA", "AMD", "XOM", "USO"))))
+nrow(diario)
+```
+
+### JPM vs GS
+
+```{r}
+reg_jpm <- lm(jpm ~ gs, data = diario)
+summary(reg_jpm)
+```
+
+### NVDA vs AMD
+
+```{r}
+reg_nvda <- lm(nvda ~ amd, data = diario)
+summary(reg_nvda)
+```
+
+### XOM vs USO
+
+```{r}
+reg_xom <- lm(xom ~ uso, data = diario)
+summary(reg_xom)
+```
+
+## Comentarios - Cotejo de regresiones
+
+| Modelo | Fuente | Beta | Alfa (intercepto) | R2 | Observaciones |
+|---|---|---|---|---|---|
+| JPM ~ GS | Bloomberg | 0.284 | 64.708 | 0.930 | 947 |
+| JPM ~ GS | R | 0.284 | 64.708 | 0.930 | 947 |
+| NVDA ~ AMD | Bloomberg | 0.361 | 52.019 | 0.520 | 947 |
+| NVDA ~ AMD | R | 0.361 | 52.019 | 0.520 | 947 |
+| XOM ~ USO | Bloomberg | 0.707 | 61.496 | 0.799 | 947 |
+| XOM ~ USO | R | 0.707 | 61.496 | 0.799 | 947 |
+
+Los resultados de R son los mismos que los de Bloomberg en las tres regresiones: misma beta, mismo intercepto, misma R2 y el mismo numero de observaciones (947 dias). El t de la beta tambien coincide (112.2 en JPM, 32.0 en NVDA y 61.3 en XOM), igual que el error estandar residual ("Std Dev of Error" en Bloomberg, "Residual standard error" en R).
+
+Interpretacion: en JPM ~ GS, por cada dolar que sube el precio de GS, el precio de JPM sube en promedio 0.28 dolares, y la relacion es significativa (p < 0.001). El modelo explica el 93% de la variacion del precio de JPM.
+
+Cuidado con la lectura: estas regresiones de Bloomberg estan hechas con precios, no con rendimientos. Como los precios de ambas acciones tienen tendencia al alza en el periodo, la R2 sale muy alta en parte por la tendencia comun y no solo porque se muevan juntas dia a dia (riesgo de regresion espuria, como se vio en la Tarea 1). Por eso en la Tarea 2 y la Tarea 3 los modelos se hicieron con rendimientos.
+
+## Parte 3 - Matrices de correlacion: Bloomberg (CORR) vs R
+
+En Bloomberg (CORR) las tres matrices se hicieron con datos diarios del 08/10/2025 al 09/10/2026, calculando la correlacion de los rendimientos diarios. Se replica igual en R.
+
+```{r}
+rend_diarios <- function(tickers) {
+  x <- precios(tickers)["2025-10-08/2026-10-09"]
+  na.omit(ROC(x, type = "discrete"))
+}
+```
+
+### Tecnologia
+
+```{r}
+round(cor(rend_diarios(c("NVDA", "AMD", "SPY", "AVGO", "MSFT", "SMH"))), 3)
+```
+
+### Bancos
+
+```{r}
+round(cor(rend_diarios(c("BAC", "C", "GS", "SPY", "TLT", "JPM"))), 3)
+```
+
+### Energia
+
+```{r}
+round(cor(rend_diarios(c("XOM", "CVX", "COP", "USO", "SPY", "TLT"))), 3)
+```
+
+## Comentarios - Cotejo de correlaciones
+
+Las tres matrices de R dan los mismos valores que Bloomberg, con tres decimales. Por ejemplo:
+
+| Par | Bloomberg | R |
+|---|---|---|
+| NVDA - SMH | 0.688 | 0.688 |
+| NVDA - SPY | 0.646 | 0.646 |
+| JPM - BAC | 0.749 | 0.749 |
+| JPM - SPY | 0.459 | 0.459 |
+| XOM - CVX | 0.842 | 0.842 |
+| XOM - SPY | -0.276 | -0.276 |
+
+Lo que dicen las correlaciones diarias del ultimo ano:
+
+- Cada accion se mueve sobre todo con su sector: NVDA con SMH (0.69), JPM con BAC (0.75) y XOM con CVX (0.84).
+- XOM tiene correlacion negativa con el mercado (-0.28) y con los bonos (-0.35): es el diversificador del portafolio.
+- TLT casi no se relaciona con los bancos (0.03 con BAC y 0.11 con JPM).
+
+## Parte 4 - Cotejo intradia: Bloomberg vs LSEG (5 minutos)
+
+Se usa el intervalo de 5 minutos del 8 y 9 de octubre de 2026, los dias que tienen las dos fuentes. Variable dependiente: JPM. Matriz de correlacion con 8 acciones: las 3 del portafolio (JPM, XOM y NVDA) y BAC, CVX, AMD, SPY y TLT.
+
+Dos ajustes para que las fuentes sean comparables:
+
+- Bloomberg exporta la hora en tiempo de Monterrey; se le suman 2 horas para pasarla a hora de Nueva York (LSEG ya esta en hora de Nueva York).
+- Bloomberg etiqueta cada barra con su hora de inicio y LSEG con su hora de cierre (la barra de 9:30 a 9:35 en Bloomberg es "9:30" y en LSEG es "9:35"); se le suman 5 minutos a Bloomberg.
+
+```{r}
+bbg <- as.data.frame(read_excel("Jaime Gza.xlsx", sheet = "5min", skip = 2))
+bbg <- bbg[, !grepl("^\\.\\.\\.", colnames(bbg))]   # quita la columna vacia del inicio si R la lee
+colnames(bbg) <- c("fecha_hora", tolower(sub(" .*", "", colnames(bbg)[-1])))
+bbg$fecha_hora_NY <- bbg$fecha_hora + 2 * 3600 + 5 * 60
+
+lseg <- as.data.frame(read_excel("Datos intradia LSEG.xlsx", sheet = "5min"))
+
+# Solo los minutos que tienen las dos fuentes
+bbg <- bbg[bbg$fecha_hora_NY %in% lseg$fecha_hora_NY, ]
+lseg <- lseg[lseg$fecha_hora_NY %in% bbg$fecha_hora_NY, ]
+```
+
+```{r}
+rend_intradia <- function(datos, cols) {
+  datos <- na.omit(datos[, c("fecha_hora_NY", cols)])
+  datos <- datos[order(datos$fecha_hora_NY), ]
+  n <- nrow(datos)
+  rend <- datos[-1, cols] / datos[-n, cols] - 1
+  mismo_dia <- as.Date(datos$fecha_hora_NY[-1]) == as.Date(datos$fecha_hora_NY[-n])
+  rend <- as.data.frame(rend)[mismo_dia, , drop = FALSE]
+  colnames(rend) <- cols
+  rend
+}
+
+cols <- c("jpm", "bac", "xom", "cvx", "nvda", "amd", "spy", "tlt")
+r_bbg <- rend_intradia(bbg, cols)
+r_lseg <- rend_intradia(lseg, cols)
+nrow(r_bbg)
+nrow(r_lseg)
+```
+
+### Regresion lineal simple: JPM vs BAC
+
+```{r}
+reg_bbg <- lm(jpm ~ bac, data = r_bbg)
+summary(reg_bbg)
+```
+
+```{r}
+reg_lseg <- lm(jpm ~ bac, data = r_lseg)
+summary(reg_lseg)
+```
+
+### Matriz de correlacion
+
+```{r}
+round(cor(r_bbg), 2)
+```
+
+```{r}
+round(cor(r_lseg), 2)
+```
+
+```{r}
+# Diferencia mas grande entre las dos matrices
+max(abs(cor(r_bbg) - cor(r_lseg)))
+```
+
+## Comentarios - Cotejo intradia
+
+Despues de ajustar la hora, los precios de las dos fuentes coinciden casi exacto: la diferencia promedio es de menos de 4 centavos en casi todas las acciones (por ejemplo, 3.6 centavos en JPM y 2.6 en NVDA y XOM); la mas alta es AMD con 11 centavos, que tiene un precio de alrededor de 600 dolares. Las diferencias pequenas vienen de que cada proveedor toma el ultimo precio de la barra de fuentes de negociacion ligeramente distintas.
+
+Regresion JPM ~ BAC (154 rendimientos de 5 minutos con cada fuente):
+
+| Fuente | Beta de BAC | Error estandar | p-value | R2 |
+|---|---|---|---|---|
+| Bloomberg | 0.576 | 0.045 | < 0.001 | 0.519 |
+| LSEG | 0.612 | 0.048 | < 0.001 | 0.514 |
+
+Las dos fuentes llevan a la misma conclusion: si BAC sube 1% en 5 minutos, JPM sube en promedio alrededor de 0.6%, la relacion es significativa y el modelo explica cerca del 51% de la variacion de JPM. La diferencia entre las betas (0.58 contra 0.61) esta dentro de los intervalos de confianza de cada una.
+
+Matriz de correlacion: las dos matrices son practicamente iguales; de los 28 pares, 26 difieren en menos de 0.05 y la diferencia mas grande es de 0.095 (NVDA con SPY). Las dos muestran lo mismo: JPM con BAC 0.72, XOM con CVX 0.86 en Bloomberg y 0.82 en LSEG, NVDA con AMD 0.67 y 0.65, y correlaciones bajas o negativas entre sectores (JPM con NVDA cerca de -0.2).
+
+Comparando con los datos diarios de Bloomberg, las correlaciones intradia son mas bajas (por ejemplo, JPM con SPY 0.46 en diario contra 0.18 a 0.20 en 5 minutos), que es el efecto Epps visto en la Actividad 3.
+
+Conclusion: Bloomberg y LSEG dan los mismos resultados una vez que se ajustan la zona horaria y la forma de etiquetar las barras. Las diferencias son de centavos en precios y de centesimas en correlaciones y betas, y no cambian ninguna conclusion.
+
+## Operaciones en HowTheMarketWorks
+
+Con base en las correlaciones de Bloomberg, se compran acciones de TLT (bonos del Tesoro de largo plazo) con parte del efectivo restante: TLT tiene correlacion negativa con XOM (-0.35) y casi nula con los bancos (0.03 con BAC y 0.11 con JPM), asi que agrega diversificacion al portafolio de JPM, XOM y NVDA. Los screenshots de la operacion se entregan en archivo aparte.
+
+## Gujarati Capitulo 16 - Datos de panel: preguntas 16.1 a 16.4
+
+### 16.1 Caracteristicas de los datos de corte transversal, series de tiempo y panel
+
+a) Corte transversal: muchas unidades (personas, empresas, paises) observadas en un mismo momento. Como las unidades son distintas en tamano y caracteristicas, es comun la heteroscedasticidad.
+
+b) Series de tiempo: una sola unidad observada a lo largo del tiempo. Se supone que la serie es estacionaria y es comun la autocorrelacion, porque lo que pasa en un periodo se relaciona con el anterior.
+
+c) Panel: las mismas unidades observadas a lo largo del tiempo, combina las dos dimensiones. Tiene mas observaciones y mas variacion, reduce la multicolinealidad, permite estudiar dinamicas (como cambian las unidades en el tiempo) y permite controlar diferencias entre unidades que no se observan (heterogeneidad).
+
+### 16.2 Modelo de efectos fijos (MEF)
+
+En el modelo de efectos fijos cada unidad tiene su propio intercepto, que captura las caracteristicas propias de esa unidad que no cambian en el tiempo, mientras que las pendientes son las mismas para todas. Es "fijo" porque el intercepto de cada unidad no cambia en el tiempo. Se estima con variables dicotomicas (dummies) por unidad (minimos cuadrados con variables dicotomicas, LSDV). Para incluir la dimension del tiempo se agregan tambien dummies por periodo, que capturan efectos que afectan a todas las unidades en un mismo periodo (por ejemplo, una crisis o un cambio de regulacion); asi el modelo controla tanto por unidad como por tiempo (efectos fijos de dos vias).
+
+### 16.3 Modelo de componentes del error (MCE) o de efectos aleatorios
+
+En el modelo de componentes del error el intercepto de cada unidad no es fijo, sino una variable aleatoria: el intercepto de la unidad i es un intercepto promedio comun mas un componente aleatorio propio de esa unidad. Ese componente pasa a formar parte del error, que queda compuesto por el error propio de la unidad y el error usual. Se estima con minimos cuadrados generalizados.
+
+Diferencia con el MEF: en el MEF cada unidad tiene su propio intercepto (que puede estar correlacionado con las variables explicativas); en el MCE las diferencias entre unidades son aleatorias y se supone que no estan correlacionadas con las variables explicativas.
+
+Cuando usar cada uno: el MCE es apropiado cuando las unidades son una muestra aleatoria de una poblacion grande y el componente propio de cada unidad no esta correlacionado con las X. El MEF es apropiado cuando ese componente si puede estar correlacionado con las X, o cuando las unidades no son una muestra aleatoria sino las unidades que interesan (por ejemplo, cuatro aerolineas especificas). La prueba de Hausman ayuda a decidir entre los dos.
+
+### 16.4 Diferencia entre LSDV, estimador within y primeras diferencias
+
+Los tres eliminan o controlan los efectos propios de cada unidad que no cambian en el tiempo, pero de forma distinta:
+
+- LSDV agrega una variable dicotomica por unidad y estima un intercepto para cada una.
+- El estimador within (intragrupos) le resta a cada variable su promedio por unidad, lo que elimina el intercepto propio. Da exactamente las mismas pendientes que LSDV, pero sin estimar los interceptos de cada unidad.
+- Primeras diferencias le resta a cada observacion la del periodo anterior de la misma unidad, lo que tambien elimina el efecto fijo. Sus pendientes en general son distintas a las de LSDV y within (solo coinciden cuando hay dos periodos). Es preferible cuando los errores estan muy autocorrelacionados, mientras que within es preferible cuando los errores no estan autocorrelacionados.
+
+## Declaracion de uso de inteligencia artificial
+
+Se utilizo Claude (Anthropic) como apoyo para replicar en R los resultados de Bloomberg, escribir y revisar el codigo en R y redactar un primer borrador de las interpretaciones y de las respuestas del Gujarati, que el autor reviso, verifico contra los resultados y ajusto. Las pantallas de Bloomberg y las operaciones en HowTheMarketWorks las realizo el autor.
+
+
+
+
+
